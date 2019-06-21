@@ -4,6 +4,7 @@ go 1.12
 
 require (
 	github.com/alexflint/go-arg v1.0.0
+	github.com/aws/aws-lambda-go v1.11.1
 	github.com/bradleyfalzon/ghinstallation v0.1.2
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
 	github.com/google/go-github/v26 v26.0.4

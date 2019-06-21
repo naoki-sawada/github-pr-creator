@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/alexflint/go-arg"
 	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/v26/github"
@@ -142,7 +143,7 @@ func newPR(client *github.Client, config config, options *options, wg *sync.Wait
 	}
 }
 
-func main() {
+func HandleRequest(lamdaCtx context.Context) (string, error) {
 	// Parse environ variables
 	var goenv env
 	err := envconfig.Process("env", &goenv)
@@ -204,4 +205,10 @@ func main() {
 		go newPR(client, v, &opt, &wg)
 	}
 	wg.Wait()
+
+	return "Suceeded", nil
+}
+
+func main() {
+	lambda.Start(HandleRequest)
 }
