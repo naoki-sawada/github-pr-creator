@@ -39,10 +39,11 @@ type options struct {
 }
 
 type config struct {
-	Owner string `json:"owner"`
-	Repo  string `json:"repo"`
-	Head  string `json:"head"`
-	Base  string `json:"base"`
+	Owner     string   `json:"owner"`
+	Repo      string   `json:"repo"`
+	Head      string   `json:"head"`
+	Base      string   `json:"base"`
+	Reviewers []string `json:"reviewers"`
 }
 
 func parseJsonConfig(filename string, config *[]config) error {
@@ -93,7 +94,13 @@ func createPR(client *github.Client, config *config) error {
 	title := fmt.Sprintf("[NEW RELEASE] %s <- %s (%s)", config.Base, config.Head, time.Now().Format("2006/01/02"))
 	pr := github.NewPullRequest{Title: &title, Head: &config.Head, Base: &config.Base}
 
-	_, _, err := client.PullRequests.Create(context.Background(), config.Owner, config.Repo, &pr)
+	pull, _, err := client.PullRequests.Create(context.Background(), config.Owner, config.Repo, &pr)
+	if err != nil {
+		return err
+	}
+
+	reviwers := github.ReviewersRequest{Reviewers: config.Reviewers}
+	_, _, err = client.PullRequests.RequestReviewers(context.Background(), config.Owner, config.Repo, *pull.Number, reviwers)
 	if err != nil {
 		return err
 	}
