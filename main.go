@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,8 +12,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github-pr-creator/utils"
 
 	"github.com/alexflint/go-arg"
 	"github.com/bradleyfalzon/ghinstallation"
@@ -180,15 +179,14 @@ func main() {
 			log.Fatal("`GITHUB_INTEGRATION_ID` or `GITHUB_INSTALLATION_ID` is invalid.")
 		}
 
-		// Create private key from base64 encoded string
-		keyfile := "private-key.pem"
-		err = utils.Base64ToFile(goenv.Key, keyfile)
+		// Decode base64 env
+		dec, err := base64.StdEncoding.DecodeString(goenv.Key)
 		if err != nil {
-			log.Fatal("Failed to private key", err.Error())
+			log.Fatal("Failed decode key", err.Error())
 		}
 
 		// Create new github clinet
-		itr, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, goenv.IntegrationId, goenv.InstallationId, keyfile)
+		itr, err := ghinstallation.New(http.DefaultTransport, goenv.IntegrationId, goenv.InstallationId, dec)
 		if err != nil {
 			log.Fatal("Failed to get key file: ", err)
 		}
