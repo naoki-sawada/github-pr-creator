@@ -6,13 +6,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github-pr-creator/utils"
+
 	"github.com/alexflint/go-arg"
+	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/v26/github"
+	"github.com/kelseyhightower/envconfig"
 	"github.com/thoas/go-funk"
 	"golang.org/x/oauth2"
 )
@@ -20,6 +25,13 @@ import (
 type commit struct {
 	date time.Time
 	sha  string
+}
+
+type env struct {
+	Token          string `envconfig:"GITHUB_ACCESS_TOKEN"`
+	Key            string `envconfig:"GITHUB_KEY"`
+	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID"`
+	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID"`
 }
 
 type options struct {
@@ -126,9 +138,10 @@ func newPR(client *github.Client, config config, options *options, wg *sync.Wait
 
 func main() {
 	// Parse environ variables
-	token := os.Getenv("GITHUB_ACCESS_TOKEN")
-	if token == "" {
-		log.Fatal("Unauthorized: No token present")
+	var goenv env
+	err := envconfig.Process("env", &goenv)
+	if err != nil {
+		log.Fatal(err.Error())
 	}
 
 	// Parse arg
@@ -138,16 +151,46 @@ func main() {
 	// Parse config
 	configFile := "app.config.json"
 	var myConfig []config
-	err := parseJsonConfig(configFile, &myConfig)
+	err = parseJsonConfig(configFile, &myConfig)
 	if err != nil {
 		log.Fatal("Failed to parse the config file: ", err)
 	}
 
 	// Create new client
 	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
+	var client *github.Client
+	if goenv.Token != "" {
+		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: goenv.Token})
+		tc := oauth2.NewClient(ctx, ts)
+		client = github.NewClient(tc)
+		log.Println("Create clinet with token")
+	} else if goenv.Key != "" {
+		// Validate envrion vrariables
+		if goenv.IntegrationId == 0 || goenv.InstallationId == 0 {
+			log.Fatal("`GITHUB_INTEGRATION_ID` and `GITHUB_INSTALLATION_ID` is required.")
+		}
+		if goenv.IntegrationId < 0 || goenv.InstallationId < 0 {
+			log.Fatal("`GITHUB_INTEGRATION_ID` or `GITHUB_INSTALLATION_ID` is invalid.")
+		}
+
+		// Create private key from base64 encoded string
+		keyfile := "private-key.pem"
+		err = utils.Base64ToFile(goenv.Key, keyfile)
+		if err != nil {
+			log.Fatal("Failed to private key", err.Error())
+		}
+
+		// Create new github clinet
+		itr, err := ghinstallation.NewKeyFromFile(http.DefaultTransport, goenv.IntegrationId, goenv.InstallationId, keyfile)
+		if err != nil {
+			log.Fatal("Failed to get key file: ", err)
+		}
+		client = github.NewClient(&http.Client{Transport: itr})
+		log.Println("Create clinet with key")
+	} else {
+		client = github.NewClient(nil)
+		log.Println("Create clinet with no config")
+	}
 
 	// Run create new PR func
 	var wg sync.WaitGroup
