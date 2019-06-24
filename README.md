@@ -35,7 +35,8 @@ At first, you create `app.config.json` config file, like this.
     "owner": "Your owner name",
     "repo": "Your repository name",
     "head": "Head branch name",
-    "base": "Base branch name"
+    "base": "Base branch name",
+    "reviewers": ["Reviewer name"]
   }
 ]
 ```
