@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -27,10 +28,12 @@ type commit struct {
 }
 
 type env struct {
-	Token          string `envconfig:"GITHUB_ACCESS_TOKEN"`
-	Key            string `envconfig:"GITHUB_KEY"`
-	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID"`
-	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID"`
+	Token          string `envconfig:"GITHUB_ACCESS_TOKEN" required:"true"`
+	Key            string `envconfig:"GITHUB_KEY" required:"true"`
+	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID" required:"true"`
+	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID" required:"true"`
+	ConfigURL      string `envconfig:"CONFIG_URL" required:"false"`
+	ConfigURLToken string `envconfig:"CONFIG_URL_TOKEN" required:"false"`
 }
 
 type options struct {
@@ -54,6 +57,41 @@ func parseJsonConfig(filename string, config *[]config) error {
 
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 	json.Unmarshal(byteValue, config)
+
+	return nil
+}
+
+func parseJsonConfigFromURL(url string, token string, config *[]config) error {
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+
+	authzHeader := ""
+	if len(token) > 0 {
+		authzHeader = fmt.Sprintf("Bearer %s", token)
+		request.Header.Set("Authorization", authzHeader)
+	}
+
+	res, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return errors.New(fmt.Sprintf("HTTP Error: %d", res.StatusCode))
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(config); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -157,9 +195,17 @@ func main() {
 	// Parse config
 	configFile := "app.config.json"
 	var myConfig []config
-	err = parseJsonConfig(configFile, &myConfig)
-	if err != nil {
-		log.Fatal("Failed to parse the config file: ", err)
+
+	if len(goenv.ConfigURL) > 0 {
+		err = parseJsonConfigFromURL(goenv.ConfigURL, goenv.ConfigURLToken, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file: ", err)
+		}
+	} else {
+		err = parseJsonConfig(configFile, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file: ", err)
+		}
 	}
 
 	// Create new client
