@@ -73,7 +73,7 @@ func parseJsonConfigFromURL(url string, token string, config *[]config) error {
 
 	request.Header.Set("Content-Type", "application/json")
 
-	if token == "" {
+	if token != "" {
 		authzHeader := fmt.Sprintf("Bearer %s", token)
 		request.Header.Set("Authorization", authzHeader)
 	}
@@ -195,7 +195,7 @@ func main() {
 	configFile := "app.config.json"
 	var myConfig []config
 
-	if goenv.ConfigURL == "" {
+	if goenv.ConfigURL != "" {
 		err = parseJsonConfigFromURL(goenv.ConfigURL, goenv.ConfigURLToken, &myConfig)
 		if err != nil {
 			log.Fatal("Failed to parse the config file: ", err)
