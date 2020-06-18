@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -13,8 +14,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/alexflint/go-arg"
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/v26/github"
 	"github.com/kelseyhightower/envconfig"
@@ -28,10 +32,14 @@ type commit struct {
 }
 
 type env struct {
-	Token          string `envconfig:"GITHUB_ACCESS_TOKEN"`
-	Key            string `envconfig:"GITHUB_KEY"`
-	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID"`
-	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID"`
+	Token          string `envconfig:"GITHUB_ACCESS_TOKEN" required:"false"`
+	Key            string `envconfig:"GITHUB_KEY" required:"false"`
+	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID" required:"false"`
+	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID" required:"false"`
+	ConfigURL      string `envconfig:"CONFIG_URL" required:"false"`
+	ConfigURLToken string `envconfig:"CONFIG_URL_TOKEN" required:"false"`
+	ConfigS3Bucket string `envconfig:"CONFIG_S3_BUCKET" required:"false"`
+	ConfigS3Key    string `envconfig:"CONFIG_S3_KEY" required:"false"`
 }
 
 type options struct {
@@ -56,6 +64,61 @@ func parseJsonConfig(filename string, config *[]config) error {
 	byteValue, _ := ioutil.ReadAll(jsonFile)
 	json.Unmarshal(byteValue, config)
 
+	return nil
+}
+
+func parseJsonConfigFromURL(url string, token string, config *[]config) error {
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+
+	request, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+
+	if token != "" {
+		authzHeader := fmt.Sprintf("Bearer %s", token)
+		request.Header.Set("Authorization", authzHeader)
+	}
+
+	res, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return errors.New(fmt.Sprintf("HTTP Error: %d", res.StatusCode))
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func parseJsonConfigFromS3(bucket string, key string, config *[]config) error {
+	svc := s3.New(session.New(), &aws.Config{})
+	obj, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	defer obj.Body.Close()
+	if err != nil {
+		return err
+	}
+	body, err := ioutil.ReadAll(obj.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(body, config)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -99,8 +162,8 @@ func createPR(client *github.Client, config *config) error {
 		return err
 	}
 
-	reviwers := github.ReviewersRequest{Reviewers: config.Reviewers}
-	_, _, err = client.PullRequests.RequestReviewers(context.Background(), config.Owner, config.Repo, *pull.Number, reviwers)
+	reviewers := github.ReviewersRequest{Reviewers: config.Reviewers}
+	_, _, err = client.PullRequests.RequestReviewers(context.Background(), config.Owner, config.Repo, *pull.Number, reviewers)
 	if err != nil {
 		return err
 	}
@@ -158,9 +221,22 @@ func HandleRequest(lamdaCtx context.Context) (string, error) {
 	// Parse config
 	configFile := "app.config.json"
 	var myConfig []config
-	err = parseJsonConfig(configFile, &myConfig)
-	if err != nil {
-		log.Fatal("Failed to parse the config file: ", err)
+
+	if goenv.ConfigURL != "" {
+		err = parseJsonConfigFromURL(goenv.ConfigURL, goenv.ConfigURLToken, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file: ", err)
+		}
+	} else if goenv.ConfigS3Bucket != "" && goenv.ConfigS3Key != "" {
+		err = parseJsonConfigFromS3(goenv.ConfigS3Bucket, goenv.ConfigS3Key, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file from S3: ", err)
+		}
+	} else {
+		err = parseJsonConfig(configFile, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file: ", err)
+		}
 	}
 
 	// Create new client
@@ -170,9 +246,9 @@ func HandleRequest(lamdaCtx context.Context) (string, error) {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: goenv.Token})
 		tc := oauth2.NewClient(ctx, ts)
 		client = github.NewClient(tc)
-		log.Println("Create clinet with token")
+		log.Println("Create client with token")
 	} else if goenv.Key != "" {
-		// Validate envrion vrariables
+		// Validate environment variables
 		if goenv.IntegrationId == 0 || goenv.InstallationId == 0 {
 			log.Fatal("`GITHUB_INTEGRATION_ID` and `GITHUB_INSTALLATION_ID` is required.")
 		}
@@ -183,19 +259,19 @@ func HandleRequest(lamdaCtx context.Context) (string, error) {
 		// Decode base64 env
 		dec, err := base64.StdEncoding.DecodeString(goenv.Key)
 		if err != nil {
-			log.Fatal("Failed decode key", err.Error())
+			log.Fatal("Failed to decode key", err.Error())
 		}
 
-		// Create new github clinet
+		// Create new github client
 		itr, err := ghinstallation.New(http.DefaultTransport, goenv.IntegrationId, goenv.InstallationId, dec)
 		if err != nil {
 			log.Fatal("Failed to get key file: ", err)
 		}
 		client = github.NewClient(&http.Client{Transport: itr})
-		log.Println("Create clinet with key")
+		log.Println("Create client with key")
 	} else {
 		client = github.NewClient(nil)
-		log.Println("Create clinet with no config")
+		log.Println("Create client with no config")
 	}
 
 	// Run create new PR func
