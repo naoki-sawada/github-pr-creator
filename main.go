@@ -15,6 +15,9 @@ import (
 	"time"
 
 	"github.com/alexflint/go-arg"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/v26/github"
 	"github.com/kelseyhightower/envconfig"
@@ -34,6 +37,8 @@ type env struct {
 	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID" required:"false"`
 	ConfigURL      string `envconfig:"CONFIG_URL" required:"false"`
 	ConfigURLToken string `envconfig:"CONFIG_URL_TOKEN" required:"false"`
+	ConfigS3Bucket string `envconfig:"CONFIG_S3_BUCKET" required:"false"`
+	ConfigS3Key    string `envconfig:"CONFIG_S3_KEY" required:"false"`
 }
 
 type options struct {
@@ -92,6 +97,27 @@ func parseJsonConfigFromURL(url string, token string, config *[]config) error {
 		return err
 	}
 
+	return nil
+}
+
+func parseJsonConfigFromS3(bucket string, key string, config *[]config) error {
+	svc := s3.New(session.New(), &aws.Config{})
+	obj, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	defer obj.Body.Close()
+	if err != nil {
+		return err
+	}
+	body, err := ioutil.ReadAll(obj.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(body, config)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -199,6 +225,11 @@ func main() {
 		err = parseJsonConfigFromURL(goenv.ConfigURL, goenv.ConfigURLToken, &myConfig)
 		if err != nil {
 			log.Fatal("Failed to parse the config file: ", err)
+		}
+	} else if goenv.ConfigS3Bucket != "" && goenv.ConfigS3Key != "" {
+		err = parseJsonConfigFromS3(goenv.ConfigS3Bucket, goenv.ConfigS3Key, &myConfig)
+		if err != nil {
+			log.Fatal("Failed to parse the config file from S3: ", err)
 		}
 	} else {
 		err = parseJsonConfig(configFile, &myConfig)
