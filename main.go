@@ -28,10 +28,10 @@ type commit struct {
 }
 
 type env struct {
-	Token          string `envconfig:"GITHUB_ACCESS_TOKEN" required:"true"`
-	Key            string `envconfig:"GITHUB_KEY" required:"true"`
-	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID" required:"true"`
-	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID" required:"true"`
+	Token          string `envconfig:"GITHUB_ACCESS_TOKEN" required:"false"`
+	Key            string `envconfig:"GITHUB_KEY" required:"false"`
+	IntegrationId  int    `envconfig:"GITHUB_INTEGRATION_ID" required:"false"`
+	InstallationId int    `envconfig:"GITHUB_INSTALLATION_ID" required:"false"`
 	ConfigURL      string `envconfig:"CONFIG_URL" required:"false"`
 	ConfigURLToken string `envconfig:"CONFIG_URL_TOKEN" required:"false"`
 }
